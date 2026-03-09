@@ -24,15 +24,14 @@ export async function POST(req: NextRequest) {
 
     for (const file of files) {
       const bytes = Buffer.from(await file.arrayBuffer());
-      // 用时间戳避免同名文件覆盖
       const safeName = `${Date.now()}_${file.name}`;
       const savePath = path.join(uploadDir, safeName);
       await fs.writeFile(savePath, bytes);
 
+      // parseFile 现在返回 ExtractedRecord[]，展平追加
       const parsed = await parseFile(savePath, file.name);
-      results.push(parsed);
+      results.push(...parsed);
 
-      // 解析完成后删除临时文件
       try {
         await fs.unlink(savePath);
       } catch {}

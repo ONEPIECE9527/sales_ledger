@@ -5,7 +5,12 @@ import { Upload, FileSpreadsheet, Image, Loader2, Download, AlertCircle, CheckCi
 
 type RecordItem = {
   sourceFileName: string;
-  sourceType: "excel" | "image";
+  sourceType:
+    | "delivery-order-excel"
+    | "delivery-order-image"
+    | "warehouse-shipping-excel"
+    | "excel"
+    | "image";
   customerName: string | null;
   date: string | null;
   deliveryProvince: string | null;
@@ -124,7 +129,7 @@ export default function HomePage() {
     <main className="mx-auto max-w-7xl p-6 min-h-screen">
       {/* 页面标题 */}
       <div className="mb-8">
-        <h1 className="text-2xl font-bold text-gray-900">销售台账 AI 抽取系统</h1>
+        <h1 className="text-2xl font-bold text-gray-900">Lily-销售台账</h1>
         <p className="mt-1 text-sm text-gray-500">
           上传 Excel 或图片出库单，自动提取字段并导出标准销售台账
         </p>
@@ -296,7 +301,9 @@ export default function HomePage() {
                     />
                     <td className="border border-gray-200 px-3 py-2 text-right whitespace-nowrap">
                       {item.quantityNormalized != null
-                        ? Number(item.quantityNormalized).toFixed(3)
+                        ? item.sourceType === "warehouse-shipping-excel"
+                          ? item.quantityNormalized
+                          : Number(item.quantityNormalized).toFixed(3)
                         : ""}
                       {item.quantityUnit && (
                         <span className="text-gray-400 text-xs ml-1">

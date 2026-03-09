@@ -1,4 +1,10 @@
-export type SourceType = "excel" | "image";
+export type SourceType =
+  | "delivery-order-excel"
+  | "delivery-order-image"
+  | "warehouse-shipping-excel"
+  // 兼容旧值
+  | "excel"
+  | "image";
 
 export interface ExtractedRecord {
   sourceFileName: string;
