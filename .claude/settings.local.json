@@ -5,7 +5,8 @@
       "Bash(npx next:*)",
       "Bash(npm run:*)",
       "Bash(node:*)",
-      "Bash(rm:*)"
+      "Bash(rm:*)",
+      "mcp__ide__getDiagnostics"
     ]
   }
 }

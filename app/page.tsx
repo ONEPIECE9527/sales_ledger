@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { Upload, FileSpreadsheet, Image, Loader2, Download, AlertCircle, CheckCircle2, Trash2 } from "lucide-react";
 
 type RecordItem = {
@@ -30,10 +30,15 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [editedResults, setEditedResults] = useState<RecordItem[]>([]);
+  const [countdown, setCountdown] = useState(0);
+  const autoParseTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const filesRef = useRef<File[]>([]);
+
+  filesRef.current = files;
 
   const activeResults = editedResults.length ? editedResults : results;
 
-  const handleFileChange = (newFiles: FileList | null) => {
+  const handleFileChange = (newFiles: FileList | null, isFolder = false) => {
     if (!newFiles) return;
     const arr = Array.from(newFiles).filter((f) =>
       /\.(xlsx|xls|jpg|jpeg|png)$/i.test(f.name)
@@ -42,7 +47,56 @@ export default function HomePage() {
       const names = new Set(prev.map((f) => f.name));
       return [...prev, ...arr.filter((f) => !names.has(f.name))];
     });
+
+    if (isFolder && arr.length > 0) {
+      setCountdown(3);
+      autoParseTimerRef.current = setTimeout(() => {
+        handleParse();
+      }, 3000);
+    }
   };
+
+  useEffect(() => {
+    if (countdown > 0) {
+      const timer = setTimeout(() => setCountdown(countdown - 1), 1000);
+      return () => clearTimeout(timer);
+    }
+  }, [countdown]);
+
+  const cancelAutoParse = () => {
+    if (autoParseTimerRef.current) {
+      clearTimeout(autoParseTimerRef.current);
+      autoParseTimerRef.current = null;
+    }
+    setCountdown(0);
+  };
+
+  async function pickFolder() {
+    try {
+      const dirHandle = await (window as any).showDirectoryPicker({ mode: "read" });
+      const arr: File[] = [];
+      const readDir = async (handle: any): Promise<void> => {
+        for await (const entry of handle.values()) {
+          if (entry.kind === "file" && /\.(xlsx|xls|jpg|jpeg|png)$/i.test(entry.name)) {
+            arr.push(await entry.getFile());
+          } else if (entry.kind === "directory") {
+            await readDir(entry);
+          }
+        }
+      };
+      await readDir(dirHandle);
+      if (!arr.length) return;
+      setFiles((prev) => {
+        const names = new Set(prev.map((f) => f.name));
+        return [...prev, ...arr.filter((f) => !names.has(f.name))];
+      });
+      setCountdown(3);
+      autoParseTimerRef.current = setTimeout(() => handleParse(), 3000);
+    } catch (err: any) {
+      if (err?.name === "AbortError") return;
+      alert("浏览器不支持文件夹选择，请直接拖拽文件夹到上传区域");
+    }
+  }
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -61,13 +115,15 @@ export default function HomePage() {
   };
 
   async function handleParse() {
-    if (!files.length) return;
+    const currentFiles = filesRef.current;
+    if (!currentFiles.length) return;
     setLoading(true);
     setResults([]);
     setEditedResults([]);
+    setCountdown(0);
 
     const formData = new FormData();
-    files.forEach((file) => formData.append("files", file));
+    currentFiles.forEach((file) => formData.append("files", file));
 
     try {
       const res = await fetch("/api/parse", { method: "POST", body: formData });
@@ -137,19 +193,34 @@ export default function HomePage() {
 
       {/* 上传区域 */}
       <div
-        className={`border-2 border-dashed rounded-2xl p-8 mb-6 text-center transition-colors cursor-pointer ${
+        className={`border-2 border-dashed rounded-2xl p-8 mb-6 text-center transition-colors ${
           dragOver
             ? "border-blue-400 bg-blue-50"
-            : "border-gray-300 hover:border-gray-400 bg-white"
+            : "border-gray-300 bg-white"
         }`}
         onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
         onDragLeave={() => setDragOver(false)}
         onDrop={handleDrop}
-        onClick={() => document.getElementById("file-input")?.click()}
       >
         <Upload className="mx-auto mb-3 text-gray-400" size={32} />
-        <p className="text-gray-600 font-medium">点击或拖拽文件到此处上传</p>
-        <p className="text-gray-400 text-sm mt-1">支持 .xlsx .xls .jpg .jpeg .png</p>
+        <p className="text-gray-600 font-medium mb-1">拖拽文件到此处，或选择上传方式</p>
+        <p className="text-gray-400 text-sm mb-4">支持 .xlsx .xls .jpg .jpeg .png</p>
+        <div className="flex justify-center gap-3">
+          <button
+            type="button"
+            onClick={pickFolder}
+            className="flex items-center gap-2 rounded-xl px-5 py-2 bg-black text-white text-sm font-medium hover:bg-gray-800"
+          >
+            选择文件夹
+          </button>
+          <button
+            type="button"
+            onClick={() => document.getElementById("file-input")?.click()}
+            className="flex items-center gap-2 rounded-xl px-5 py-2 border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50"
+          >
+            选择文件
+          </button>
+        </div>
         <input
           id="file-input"
           type="file"
@@ -197,21 +268,36 @@ export default function HomePage() {
             })}
           </div>
 
-          <div className="mt-4 flex gap-3">
-            <button
-              onClick={handleParse}
-              disabled={loading}
-              className="flex items-center gap-2 rounded-xl px-5 py-2 bg-black text-white text-sm font-medium hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {loading ? (
-                <>
-                  <Loader2 size={16} className="animate-spin" />
-                  解析中...
-                </>
-              ) : (
-                "开始解析"
-              )}
-            </button>
+          <div className="mt-4 flex items-center gap-3">
+            {countdown > 0 ? (
+              <>
+                <span className="text-sm text-gray-500">
+                  <Loader2 size={14} className="inline animate-spin mr-1" />
+                  {countdown}s 后自动解析...
+                </span>
+                <button
+                  onClick={cancelAutoParse}
+                  className="rounded-xl px-4 py-2 border border-gray-300 text-gray-600 text-sm font-medium hover:bg-gray-50"
+                >
+                  终止
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={handleParse}
+                disabled={loading}
+                className="flex items-center gap-2 rounded-xl px-5 py-2 bg-black text-white text-sm font-medium hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loading ? (
+                  <>
+                    <Loader2 size={16} className="animate-spin" />
+                    解析中...
+                  </>
+                ) : (
+                  "开始解析"
+                )}
+              </button>
+            )}
           </div>
         </div>
       )}

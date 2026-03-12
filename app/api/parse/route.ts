@@ -24,12 +24,13 @@ export async function POST(req: NextRequest) {
 
     for (const file of files) {
       const bytes = Buffer.from(await file.arrayBuffer());
-      const safeName = `${Date.now()}_${file.name}`;
+      const baseName = path.basename(file.name);
+      const safeName = `${Date.now()}_${baseName}`;
       const savePath = path.join(uploadDir, safeName);
       await fs.writeFile(savePath, bytes);
 
       // parseFile 现在返回 ExtractedRecord[]，展平追加
-      const parsed = await parseFile(savePath, file.name);
+      const parsed = await parseFile(savePath, baseName);
       results.push(...parsed);
 
       try {
