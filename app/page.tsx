@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, FileSpreadsheet, Image, Loader2, Download, AlertCircle, CheckCircle2, Trash2 } from "lucide-react";
+import { Upload, FileSpreadsheet, Image, Loader2, Download, AlertCircle, CheckCircle2, Trash2, Copy, Check } from "lucide-react";
 
 type RecordItem = {
   sourceFileName: string;
@@ -32,12 +32,39 @@ export default function HomePage() {
   const [useVLM, setUseVLM] = useState(false);
   const [editedResults, setEditedResults] = useState<RecordItem[]>([]);
   const [countdown, setCountdown] = useState(0);
+  const [copied, setCopied] = useState<"all" | number | null>(null);
   const autoParseTimerRef = useRef<NodeJS.Timeout | null>(null);
   const filesRef = useRef<File[]>([]);
 
   filesRef.current = files;
 
   const activeResults = editedResults.length ? editedResults : results;
+
+  const rowToTSV = (item: RecordItem) =>
+    [
+      item.customerName ?? "",
+      item.date ?? "",
+      item.deliveryProvince ?? "",
+      item.productName ?? "",
+      item.quantityNormalized != null ? String(item.quantityNormalized) : "",
+      item.deliveryOrderNo ?? "",
+    ].join("\t");
+
+  const copyAllTSV = () => {
+    const tsv = activeResults.map(rowToTSV).join("\n");
+    navigator.clipboard.writeText(tsv).then(() => {
+      setCopied("all");
+      setTimeout(() => setCopied(null), 2000);
+    });
+  };
+
+  const copyRowTSV = (idx: number) => {
+    navigator.clipboard.writeText(rowToTSV(activeResults[idx])).then(() => {
+      setCopied(idx);
+      setTimeout(() => setCopied(null), 2000);
+    });
+  };
+
 
   const handleFileChange = (newFiles: FileList | null, isFolder = false) => {
     if (!newFiles) return;
@@ -353,13 +380,22 @@ export default function HomePage() {
                 </span>
               )}
             </div>
-            <button
-              onClick={handleExport}
-              className="flex items-center gap-2 rounded-xl px-5 py-2 bg-green-600 text-white text-sm font-medium hover:bg-green-700"
-            >
-              <Download size={16} />
-              导出标准台账
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={copyAllTSV}
+                className="flex items-center gap-2 rounded-xl px-4 py-2 border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50"
+              >
+                {copied === "all" ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
+                {copied === "all" ? "已复制" : "复制全部"}
+              </button>
+              <button
+                onClick={handleExport}
+                className="flex items-center gap-2 rounded-xl px-5 py-2 bg-green-600 text-white text-sm font-medium hover:bg-green-700"
+              >
+                <Download size={16} />
+                导出标准台账
+              </button>
+            </div>
           </div>
 
           <p className="text-xs text-gray-400 mb-3">点击单元格可直接修改内容</p>
@@ -376,6 +412,7 @@ export default function HomePage() {
                   <th className="border border-gray-200 px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap">申请数量(吨)</th>
                   <th className="border border-gray-200 px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap">出库单号</th>
                   <th className="border border-gray-200 px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap">状态</th>
+                  <th className="border border-gray-200 px-3 py-2 text-left font-medium text-gray-600 whitespace-nowrap">复制</th>
                 </tr>
               </thead>
               <tbody>
@@ -435,6 +472,15 @@ export default function HomePage() {
                       ) : (
                         <span className="text-green-500 text-xs">✓</span>
                       )}
+                    </td>
+                    <td className="border border-gray-200 px-3 py-2 text-center whitespace-nowrap">
+                      <button
+                        onClick={() => copyRowTSV(idx)}
+                        className="text-gray-400 hover:text-gray-700"
+                        title="复制此行"
+                      >
+                        {copied === idx ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+                      </button>
                     </td>
                   </tr>
                 ))}
