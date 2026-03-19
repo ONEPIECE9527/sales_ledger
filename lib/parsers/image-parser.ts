@@ -1,5 +1,6 @@
 import type { ExtractedRecord } from "../schemas/extracted-record";
 import { extractWithVLM } from "./vlm";
+import { runOCR } from "./ocr";
 import { extractOrderNo } from "../extractors/text-extractor";
 import { normalizeDate } from "../normalizers/date";
 import { getProvinceFromAddress } from "../normalizers/province";
@@ -7,41 +8,70 @@ import { normalizeQuantity } from "../normalizers/quantity";
 
 export async function parseImageFile(
   filePath: string,
-  originalName: string
+  originalName: string,
+  useVLM = true
 ): Promise<ExtractedRecord> {
   try {
-    // VLM 直接返回结构化字段，精度远高于 Tesseract
-    const extracted = await extractWithVLM(filePath);
+    if (useVLM) {
+      // AI 路径：豆包 VLM 直接返回结构化字段
+      const extracted = await extractWithVLM(filePath);
 
-    const customerName = extracted.customerName;
-    const rawAddress = extracted.address;
-    const dateRaw = extracted.date;
-    // VLM 提取出库单号；rawText 作为兜底正则来源
-    const deliveryOrderNo =
-      extracted.orderNo || extractOrderNo(extracted.rawText);
+      const customerName = extracted.customerName;
+      const rawAddress = extracted.address;
+      const dateRaw = extracted.date;
+      const deliveryOrderNo =
+        extracted.orderNo || extractOrderNo(extracted.rawText);
+      const quantityRaw = extracted.quantity;
+      const quantityUnit = extracted.unit;
+      const quantityNormalized = normalizeQuantity(quantityRaw, quantityUnit);
+      const reviewRequired =
+        !customerName || !dateRaw || !deliveryOrderNo || !extracted.productName;
 
-    const quantityRaw = extracted.quantity;
-    const quantityUnit = extracted.unit;
-    const quantityNormalized = normalizeQuantity(quantityRaw, quantityUnit);
+      return {
+        sourceFileName: originalName,
+        sourceType: "image",
+        customerName,
+        date: normalizeDate(dateRaw),
+        deliveryProvince: getProvinceFromAddress(rawAddress),
+        productName: extracted.productName ?? null,
+        quantityRaw,
+        quantityUnit,
+        quantityNormalized,
+        deliveryOrderNo,
+        rawAddress,
+        reviewRequired,
+        errorMessage: null,
+      };
+    } else {
+      // 本地 OCR 路径：PaddleOCR Python 脚本，直接返回结构化字段
+      const ocr = await runOCR(filePath);
 
-    const reviewRequired =
-      !customerName || !dateRaw || !deliveryOrderNo || !extracted.productName;
+      const customerName = ocr.customerName;
+      const rawAddress = ocr.address;
+      const dateRaw = ocr.date;
+      const deliveryOrderNo = ocr.orderNo || extractOrderNo(ocr.rawText);
+      const quantityRaw = ocr.quantity;
+      const quantityUnit = ocr.unit;
+      const quantityNormalized = normalizeQuantity(quantityRaw, quantityUnit);
+      const reviewRequired =
+        !customerName || !dateRaw || !deliveryOrderNo || !ocr.productName;
 
-    return {
-      sourceFileName: originalName,
-      sourceType: "image",
-      customerName,
-      date: normalizeDate(dateRaw),
-      deliveryProvince: getProvinceFromAddress(rawAddress),
-      productName: extracted.productName ?? null,
-      quantityRaw,
-      quantityUnit,
-      quantityNormalized,
-      deliveryOrderNo,
-      rawAddress,
-      reviewRequired,
-      errorMessage: null,
-    };
+      return {
+        sourceFileName: originalName,
+        sourceType: "image",
+        customerName,
+        date: normalizeDate(dateRaw),
+        deliveryProvince: getProvinceFromAddress(rawAddress),
+        productName: ocr.productName ?? null,
+        quantityRaw,
+        quantityUnit,
+        quantityNormalized,
+        deliveryOrderNo,
+        rawAddress,
+        reviewRequired,
+        errorMessage: null,
+      };
+    }
   } catch (error) {
     return {
       sourceFileName: originalName,

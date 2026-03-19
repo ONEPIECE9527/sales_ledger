@@ -6,7 +6,10 @@
       "Bash(npm run:*)",
       "Bash(node:*)",
       "Bash(rm:*)",
-      "mcp__ide__getDiagnostics"
+      "mcp__ide__getDiagnostics",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(npx tsc:*)"
     ]
   }
 }

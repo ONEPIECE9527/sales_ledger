@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
     const uploadDir = path.join(process.cwd(), "uploads");
     await fs.mkdir(uploadDir, { recursive: true });
 
+    const useVLM = formData.get("useVLM") !== "false";
     const results = [];
 
     for (const file of files) {
@@ -30,7 +31,7 @@ export async function POST(req: NextRequest) {
       await fs.writeFile(savePath, bytes);
 
       // parseFile 现在返回 ExtractedRecord[]，展平追加
-      const parsed = await parseFile(savePath, baseName);
+      const parsed = await parseFile(savePath, baseName, useVLM);
       results.push(...parsed);
 
       try {

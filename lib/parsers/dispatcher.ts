@@ -7,10 +7,12 @@ import type { ExtractedRecord } from "../schemas/extracted-record";
 
 /**
  * 解析单个文件，始终返回记录数组（一般单条，仓库发货 Excel 可能多条）。
+ * @param useVLM 图片解析模式：true=豆包 VLM（默认），false=本地 Tesseract OCR
  */
 export async function parseFile(
   filePath: string,
-  originalName: string
+  originalName: string,
+  useVLM = true
 ): Promise<ExtractedRecord[]> {
   const ext = path.extname(originalName).toLowerCase();
 
@@ -27,7 +29,7 @@ export async function parseFile(
   }
 
   if ([".jpg", ".jpeg", ".png"].includes(ext)) {
-    const record = await parseImageFile(filePath, originalName);
+    const record = await parseImageFile(filePath, originalName, useVLM);
     return [record];
   }
 

@@ -29,6 +29,7 @@ export default function HomePage() {
   const [results, setResults] = useState<RecordItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [useVLM, setUseVLM] = useState(false);
   const [editedResults, setEditedResults] = useState<RecordItem[]>([]);
   const [countdown, setCountdown] = useState(0);
   const autoParseTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -124,6 +125,7 @@ export default function HomePage() {
 
     const formData = new FormData();
     currentFiles.forEach((file) => formData.append("files", file));
+    formData.append("useVLM", String(useVLM));
 
     try {
       const res = await fetch("/api/parse", { method: "POST", body: formData });
@@ -268,7 +270,29 @@ export default function HomePage() {
             })}
           </div>
 
-          <div className="mt-4 flex items-center gap-3">
+          <div className="mt-4 flex items-center gap-4 flex-wrap">
+            {/* 图片解析模式切换 */}
+            <label className="flex items-center gap-2 text-sm text-gray-600 cursor-pointer select-none">
+              <span>图片解析：</span>
+              <button
+                type="button"
+                onClick={() => setUseVLM((v) => !v)}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  useVLM ? "bg-blue-600" : "bg-gray-300"
+                }`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${
+                    useVLM ? "translate-x-6" : "translate-x-1"
+                  }`}
+                />
+              </button>
+              <span className={useVLM ? "text-blue-600 font-medium" : "text-gray-500"}>
+                {useVLM ? "AI（豆包）" : "本地 OCR"}
+              </span>
+            </label>
+          </div>
+          <div className="mt-2 flex items-center gap-3">
             {countdown > 0 ? (
               <>
                 <span className="text-sm text-gray-500">
