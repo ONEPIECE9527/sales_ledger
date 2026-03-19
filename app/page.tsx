@@ -1,7 +1,8 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Upload, FileSpreadsheet, Image, Loader2, Download, AlertCircle, CheckCircle2, Trash2, Copy, Check } from "lucide-react";
+import { Upload, FileSpreadsheet, Image, Loader2, Download, AlertCircle, CheckCircle2, Trash2, Copy, Check, X } from "lucide-react";
+import * as XLSX from "xlsx";
 
 type RecordItem = {
   sourceFileName: string;
@@ -33,6 +34,7 @@ export default function HomePage() {
   const [editedResults, setEditedResults] = useState<RecordItem[]>([]);
   const [countdown, setCountdown] = useState(0);
   const [copied, setCopied] = useState<"all" | number | null>(null);
+  const [previewFile, setPreviewFile] = useState<File | null>(null);
   const autoParseTimerRef = useRef<NodeJS.Timeout | null>(null);
   const filesRef = useRef<File[]>([]);
 
@@ -278,7 +280,8 @@ export default function HomePage() {
               return (
                 <div
                   key={f.name}
-                  className="flex items-center gap-2 bg-gray-50 border rounded-lg px-3 py-1.5 text-sm"
+                  className="flex items-center gap-2 bg-gray-50 border rounded-lg px-3 py-1.5 text-sm cursor-pointer hover:bg-blue-50 hover:border-blue-200 transition-colors"
+                  onClick={() => setPreviewFile(f)}
                 >
                   {isExcel ? (
                     <FileSpreadsheet size={14} className="text-green-600" />
@@ -489,7 +492,85 @@ export default function HomePage() {
           </div>
         </div>
       )}
+      {previewFile && (
+        <PreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
+      )}
     </main>
+  );
+}
+
+function PreviewModal({ file, onClose }: { file: File; onClose: () => void }) {
+  const isImage = /\.(jpg|jpeg|png)$/i.test(file.name);
+  const [imgUrl, setImgUrl] = useState<string | null>(null);
+  const [sheetData, setSheetData] = useState<string[][]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isImage) {
+      const url = URL.createObjectURL(file);
+      setImgUrl(url);
+      return () => URL.revokeObjectURL(url);
+    } else {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        try {
+          const wb = XLSX.read(e.target?.result, { type: "array" });
+          const ws = wb.Sheets[wb.SheetNames[0]];
+          const data: string[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" });
+          setSheetData(data.slice(0, 200));
+        } catch {
+          setLoadError("无法解析该 Excel 文件");
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+  }, [file, isImage]);
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60"
+      onClick={onClose}
+    >
+      <div
+        className="relative bg-white rounded-xl shadow-2xl max-w-5xl w-full mx-4 max-h-[90vh] flex flex-col"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b">
+          <span className="text-sm font-medium text-gray-700 truncate">{file.name}</span>
+          <button onClick={onClose} className="p-1 rounded hover:bg-gray-100">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="overflow-auto flex-1 p-4">
+          {isImage && imgUrl && (
+            <img src={imgUrl} alt={file.name} className="max-w-full mx-auto rounded" />
+          )}
+          {!isImage && loadError && (
+            <p className="text-red-500 text-sm">{loadError}</p>
+          )}
+          {!isImage && !loadError && sheetData.length === 0 && (
+            <div className="flex justify-center py-10"><Loader2 className="animate-spin text-gray-400" /></div>
+          )}
+          {!isImage && sheetData.length > 0 && (
+            <div className="overflow-auto">
+              <table className="text-xs border-collapse">
+                <tbody>
+                  {sheetData.map((row, ri) => (
+                    <tr key={ri} className={ri === 0 ? "bg-gray-100 font-semibold" : "even:bg-gray-50"}>
+                      {row.map((cell, ci) => (
+                        <td key={ci} className="border border-gray-200 px-2 py-1 whitespace-nowrap">
+                          {String(cell)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
