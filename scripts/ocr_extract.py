@@ -10,17 +10,165 @@ import sys
 import json
 import re
 import io
+import os
+import time
+import http.client
+import subprocess
+from pathlib import Path
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
+OCR_PORT = int(os.environ.get("OCR_PORT", "7654"))
+OCR_AUTOSTART_SERVER = os.environ.get("OCR_AUTOSTART_SERVER", "0") == "1"
+_local_engine_fast = None
+_local_engine_full = None
 
 
-def run_ocr(image_path: str) -> list[str]:
+def _check_health(timeout_sec: float = 0.5) -> bool:
+    conn = None
+    try:
+        conn = http.client.HTTPConnection("127.0.0.1", OCR_PORT, timeout=timeout_sec)
+        conn.request("GET", "/health")
+        resp = conn.getresponse()
+        return resp.status == 200
+    except Exception:
+        return False
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def _start_server_if_needed(startup_timeout_sec: float = 30.0) -> bool:
+    if _check_health():
+        return True
+
+    script_path = Path(__file__).with_name("ocr_server.py")
+    if not script_path.exists():
+        return False
+
+    base_kwargs = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "stdin": subprocess.DEVNULL,
+        "env": {**os.environ, "PYTHONIOENCODING": "utf-8"},
+    }
+
+    started = False
+    if os.name == "nt":
+        flag_candidates = []
+        base_flags = (
+            subprocess.DETACHED_PROCESS
+            | subprocess.CREATE_NEW_PROCESS_GROUP
+            | subprocess.CREATE_NO_WINDOW
+        )
+        if hasattr(subprocess, "CREATE_BREAKAWAY_FROM_JOB"):
+            flag_candidates.append(base_flags | subprocess.CREATE_BREAKAWAY_FROM_JOB)
+        flag_candidates.append(base_flags)
+
+        for flags in flag_candidates:
+            kwargs = dict(base_kwargs)
+            kwargs["creationflags"] = flags
+            kwargs["close_fds"] = True
+            try:
+                subprocess.Popen(
+                    [sys.executable, str(script_path), str(OCR_PORT)],
+                    **kwargs,
+                )
+                started = True
+                break
+            except Exception:
+                continue
+    else:
+        try:
+            subprocess.Popen([sys.executable, str(script_path), str(OCR_PORT)], **base_kwargs)
+            started = True
+        except Exception:
+            started = False
+
+    if not started:
+        return False
+
+    deadline = time.time() + startup_timeout_sec
+    while time.time() < deadline:
+        if _check_health():
+            return True
+        time.sleep(0.2)
+    return False
+
+
+def run_ocr_via_server(image_path: str) -> dict | None:
+    if not _check_health():
+        if not OCR_AUTOSTART_SERVER:
+            return None
+        if not _start_server_if_needed():
+            return None
+    if not _check_health():
+        return None
+
+    conn = None
+    try:
+        payload = json.dumps({"imagePath": image_path}, ensure_ascii=False).encode("utf-8")
+        conn = http.client.HTTPConnection("127.0.0.1", OCR_PORT, timeout=120)
+        conn.request(
+            "POST",
+            "/ocr",
+            body=payload,
+            headers={"Content-Type": "application/json; charset=utf-8"},
+        )
+        resp = conn.getresponse()
+        data = resp.read().decode("utf-8", errors="replace")
+        parsed = json.loads(data)
+        if resp.status != 200:
+            return None
+        if isinstance(parsed, dict) and not parsed.get("error"):
+            return parsed
+        return None
+    except Exception:
+        return None
+    finally:
+        if conn is not None:
+            conn.close()
+
+
+def run_ocr_local(image_path: str, use_angle_cls: bool) -> list[str]:
     from rapidocr_onnxruntime import RapidOCR
-    engine = RapidOCR()
+    global _local_engine_fast, _local_engine_full
+
+    if use_angle_cls:
+        if _local_engine_full is None:
+            _local_engine_full = RapidOCR()
+        engine = _local_engine_full
+    else:
+        if _local_engine_fast is None:
+            _local_engine_fast = RapidOCR(use_angle_cls=False)
+        engine = _local_engine_fast
+
     result, _ = engine(image_path)
     if not result:
         return []
     return [item[1].strip() for item in result if item[1].strip()]
+
+
+def _result_score(data: dict) -> int:
+    return sum(
+        1
+        for key in (
+            "customerName",
+            "date",
+            "address",
+            "productName",
+            "quantity",
+            "unit",
+            "orderNo",
+        )
+        if data.get(key) is not None
+    )
+
+
+def _need_full_fallback(data: dict) -> bool:
+    return any(
+        data.get(key) is None
+        for key in ("customerName", "date", "productName", "quantity", "orderNo")
+    )
 
 
 def extract_fields(lines: list[str]) -> dict:
@@ -193,8 +341,17 @@ if __name__ == "__main__":
 
     image_path = sys.argv[1]
     try:
-        lines = run_ocr(image_path)
-        result = extract_fields(lines)
+        result = run_ocr_via_server(image_path)
+        if result is None:
+            fast_lines = run_ocr_local(image_path, use_angle_cls=False)
+            fast_result = extract_fields(fast_lines)
+            result = fast_result
+
+            if _need_full_fallback(fast_result):
+                full_lines = run_ocr_local(image_path, use_angle_cls=True)
+                full_result = extract_fields(full_lines)
+                if _result_score(full_result) >= _result_score(fast_result):
+                    result = full_result
         print(json.dumps(result, ensure_ascii=False))
     except Exception as e:
         print(json.dumps({"error": str(e)}, ensure_ascii=False))

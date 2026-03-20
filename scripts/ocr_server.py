@@ -12,20 +12,58 @@ import sys
 import json
 import re
 import io
+import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 # ── 启动时加载一次模型 ──────────────────────────────────────────────────────────
 from rapidocr_onnxruntime import RapidOCR
-_engine = RapidOCR()
+_engine_fast = RapidOCR(use_angle_cls=False)
+_engine_full = None
 
 
-def run_ocr(image_path: str) -> list[str]:
-    result, _ = _engine(image_path)
+def _to_lines(result) -> list[str]:
     if not result:
         return []
     return [item[1].strip() for item in result if item[1].strip()]
+
+
+def run_ocr_fast(image_path: str) -> list[str]:
+    result, _ = _engine_fast(image_path)
+    return _to_lines(result)
+
+
+def run_ocr_full(image_path: str) -> list[str]:
+    global _engine_full
+    if _engine_full is None:
+        _engine_full = RapidOCR()
+    result, _ = _engine_full(image_path)
+    return _to_lines(result)
+
+
+def _result_score(data: dict) -> int:
+    return sum(
+        1
+        for key in (
+            "customerName",
+            "date",
+            "address",
+            "productName",
+            "quantity",
+            "unit",
+            "orderNo",
+        )
+        if data.get(key) is not None
+    )
+
+
+def _need_full_fallback(data: dict) -> bool:
+    # Missing any core field means we retry with angle classifier enabled.
+    return any(
+        data.get(key) is None
+        for key in ("customerName", "date", "productName", "quantity", "orderNo")
+    )
 
 
 def extract_fields(lines: list[str]) -> dict:
@@ -191,8 +229,31 @@ class OCRHandler(BaseHTTPRequestHandler):
                 length = int(self.headers.get("Content-Length", 0))
                 body = json.loads(self.rfile.read(length))
                 image_path = body.get("imagePath", "")
-                lines = run_ocr(image_path)
-                result = extract_fields(lines)
+                fast_start = time.perf_counter()
+                fast_lines = run_ocr_fast(image_path)
+                fast_result = extract_fields(fast_lines)
+                fast_cost_ms = (time.perf_counter() - fast_start) * 1000
+
+                result = fast_result
+                if _need_full_fallback(fast_result):
+                    full_start = time.perf_counter()
+                    full_lines = run_ocr_full(image_path)
+                    full_result = extract_fields(full_lines)
+                    full_cost_ms = (time.perf_counter() - full_start) * 1000
+
+                    # Keep accuracy first: if full result is at least as complete,
+                    # prefer it.
+                    if _result_score(full_result) >= _result_score(fast_result):
+                        result = full_result
+
+                    # Optional profiling hook (off by default).
+                    if body.get("debug") is True:
+                        result["_perf"] = {
+                            "fastMs": round(fast_cost_ms, 2),
+                            "fullMs": round(full_cost_ms, 2),
+                        }
+                elif body.get("debug") is True:
+                    result["_perf"] = {"fastMs": round(fast_cost_ms, 2)}
                 self._json(200, result)
             except Exception as e:
                 self._json(500, {"error": str(e)})
